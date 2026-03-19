@@ -1,0 +1,124 @@
+# A 股数据分析系统配置文件模板
+# 请复制此文件为 config.yaml 并填写您的配置
+
+# ====================
+# 钉钉通知配置
+# ====================
+dingtalk:
+  enabled: true
+  # 从环境变量读取 webhook，避免硬编码敏感信息
+  # 设置环境变量: export DINGTALK_WEBHOOK='https://oapi.dingtalk.com/robot/send?access_token=你的token'
+  webhook: ${DINGTALK_WEBHOOK}
+
+  # 消息推送时段配置
+  push_schedule:
+    # 开盘预判 (08:45)
+    premarket:
+      enabled: true
+      time: "08:45"
+      title: "🌅 开盘预判"
+
+    # 盘中速递 (11:30, 14:30)
+    midday:
+      enabled: false
+      times: ["11:30", "14:30"]
+      title: "⏰ 盘中速递"
+
+    # 收盘复盘 (15:35)
+    postmarket:
+      enabled: true
+      time: "15:35"
+      title: "📊 收盘复盘"
+
+    # 晚间深度 (18:30, 含龙虎榜)
+    evening:
+      enabled: true
+      time: "18:30"
+      title: "🌙 晚间深度"
+
+  # @配置（可选）
+  at:
+    mobiles: []  # 要@的手机号列表
+    at_all: false  # 是否@所有人
+
+
+# ====================
+# 数据库配置
+# ====================
+database:
+  # 数据库类型: sqlite / mysql / postgresql
+  type: sqlite
+
+  # SQLite 配置
+  path: ./data/market.db
+
+  # MySQL/PostgreSQL 配置（如使用）
+  # host: localhost
+  # port: 3306
+  # name: stock_analysis
+  # user: root
+  # password: your_password
+
+
+# ====================
+# 数据源配置
+# ====================
+data_source:
+  # 主数据源: akshare / tushare / baostock
+  primary: akshare
+
+  # 降级数据源（主数据源失败时使用）
+  fallback: eastmoney
+
+  # Tushare Pro Token（如使用 Tushare）
+  # 从环境变量读取: export TUSHARE_TOKEN='你的token'
+  # tushare:
+  #   token: ${TUSHARE_TOKEN}
+
+
+# ====================
+# 同步配置
+# ====================
+sync:
+  # 默认同步天数
+  default_days: 30
+
+  # 重试配置
+  retry:
+    max_attempts: 3
+    delay: 1  # 秒
+
+  # 超时配置
+  timeout: 60  # 秒
+
+
+# ====================
+# 分析配置
+# ====================
+analysis:
+  # 市场情绪阈值
+  sentiment:
+    fear_threshold: 30
+    greed_threshold: 70
+
+  # 资金流向阈值（亿元）
+  capital_flow:
+    significant_inflow: 10
+    significant_outflow: -10
+
+
+# ====================
+# 自选股配置
+# ====================
+watchlist:
+  holdings: []
+  # 示例:
+  # - code: "600519"
+  #   name: "贵州茅台"
+  #   cost: 1800.00
+  #   shares: 100
+
+  watch: []
+  # 示例:
+  # - code: "300750"
+  #   name: "宁德时代"

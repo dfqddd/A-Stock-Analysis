@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.stock.analysis.weekend-news</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>-c</string>
+        <string>cd /Users/dfq/.openclaw/workspace-hanli/skills/a-stock-analysis &amp;&amp; python3 -m a_stock.notify.hot_news</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>/Users/dfq/.openclaw/workspace-hanli/skills/a-stock-analysis</string>
+    <key>StandardOutPath</key>
+    <string>/Users/dfq/.openclaw/workspace-hanli/skills/a-stock-analysis/logs/launchd_weekend_news.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/dfq/.openclaw/workspace-hanli/skills/a-stock-analysis/logs/launchd_weekend_news.log</string>
+    <key>StartCalendarInterval</key>
+    <array>
+        <!-- 周日晚上汇总周末消息 -->
+        <dict>
+            <key>Weekday</key>
+            <integer>7</integer>
+            <key>Hour</key>
+            <integer>20</integer>
+            <key>Minute</key>
+            <integer>0</integer>
+        </dict>
+    </array>
+</dict>
+</plist>
