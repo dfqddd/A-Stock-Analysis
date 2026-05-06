@@ -21,7 +21,7 @@ from a_stock.db.datasource import DataSource, get_manager
 
 
 def save_sentiment(records: List[Dict]):
-    """将市场情绪数据写入数据库（适配现有表结构）"""
+    """将市场情绪数据写入数据库"""
     if not records:
         return
 
@@ -34,8 +34,9 @@ def save_sentiment(records: List[Dict]):
                 """
                 INSERT OR REPLACE INTO sentiment
                 (date, limit_up_total, first_board, continuous_board, max_height, 
-                 max_height_stock, limit_down_total, seal_rate, broken_rate, broken_count)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 max_height_stock, limit_down_total, seal_rate, broken_rate, broken_count,
+                 bull_bear_index, fear_greed_index, limit_up_ratio, limit_down_ratio, turnover_rate)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     record["date"],
@@ -48,6 +49,11 @@ def save_sentiment(records: List[Dict]):
                     record.get("seal_rate", 0.0),
                     record.get("broken_rate", 0.0),
                     record.get("broken_count", 0),
+                    record.get("bull_bear_index", 0.0),
+                    record.get("fear_greed_index", 0.0),
+                    record.get("limit_up_ratio", 0.0),
+                    record.get("limit_down_ratio", 0.0),
+                    record.get("turnover_rate", 0.0),
                 ),
             )
 
@@ -391,10 +397,95 @@ def register_sentiment_datasources():
     )
 
 
+def sync_sentiment_from_market_stats(target_date: str) -> bool:
+    """
+    从 market_stats 表聚合计算市场情绪数据（降级兜底方案）
+
+    当实时行情接口不可用时（如收盘后），从已有的 market_stats 数据计算情绪指标。
+
+    Args:
+        target_date: 目标日期
+
+    Returns:
+        是否成功
+    """
+    from a_stock.db.cache import get_connection
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+
+        row = cursor.execute(
+            "SELECT up_count, down_count, flat_count, limit_up_count, limit_down_count FROM market_stats WHERE date = ?",
+            (target_date,)
+        ).fetchone()
+
+        if not row:
+            log_error(f"market_stats 表没有 {target_date} 的数据，无法聚合 sentiment")
+            return False
+
+        up_count = row[0] or 0
+        down_count = row[1] or 0
+        flat_count = row[2] or 0
+        limit_up_count = row[3] or 0
+        limit_down_count = row[4] or 0
+        total = up_count + down_count + flat_count
+
+        if total == 0:
+            log_error(f"market_stats 表 {target_date} 数据异常（总股票数为0）")
+            return False
+
+        up_ratio = up_count / total
+        bull_bear_index = round((up_count - down_count) / total * 100, 2)
+        fear_greed_index = round(
+            up_ratio * 50
+            + limit_up_count / (limit_up_count + limit_down_count + 1) * 30,
+            2
+        )
+
+        data = {
+            "date": target_date,
+            "limit_up_total": limit_up_count,
+            "limit_down_total": limit_down_count,
+            "bull_bear_index": bull_bear_index,
+            "fear_greed_index": fear_greed_index,
+            "first_board": 0,
+            "continuous_board": 0,
+            "max_height": 0,
+            "max_height_stock": "",
+            "seal_rate": None,
+            "broken_rate": None,
+            "broken_count": 0,
+            "limit_up_ratio": round(limit_up_count / (up_count + 1), 4),
+            "limit_down_ratio": round(limit_down_count / (down_count + 1), 4),
+            "turnover_rate": 0.0,
+            "new_high_ratio": 0.0,
+            "new_low_ratio": 0.0,
+        }
+
+        conn.close()
+        save_sentiment([data])
+        log_info(
+            f"从 market_stats 聚合情绪数据完成: 多空指数={bull_bear_index}, "
+            f"恐惧贪婪={fear_greed_index}, 涨停={limit_up_count}"
+        )
+        return True
+
+    except Exception as e:
+        log_error(f"从 market_stats 聚合情绪数据失败: {e}")
+        return False
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
 def sync_sentiment(date: str = None):
     """
     同步市场情绪数据（支持多数据源自动降级）
-    
+
+    优先从实时行情接口获取，若所有接口失败则从 market_stats 表聚合兜底。
+
     Args:
         date: 指定日期（可选，默认为今天）
     """
@@ -408,14 +499,17 @@ def sync_sentiment(date: str = None):
     try:
         # 使用数据源管理器获取数据（自动降级）
         data = manager.fetch("sentiment", target_date)
-        
+
         save_sentiment([data])
         log_info(f"市场情绪数据同步完成: 多空指数={data['bull_bear_index']}, "
                  f"恐惧贪婪={data['fear_greed_index']}, "
                  f"涨停数={data['limit_up_total']}")
 
     except Exception as e:
-        log_error(f"同步市场情绪数据失败: {e}")
+        log_error(f"实时行情接口同步情绪数据失败: {e}")
+        log_info("尝试从 market_stats 表聚合兜底...")
+        if not sync_sentiment_from_market_stats(target_date):
+            log_error(f"同步市场情绪数据失败: 实时接口和聚合兜底均失败")
 
 
 if __name__ == "__main__":

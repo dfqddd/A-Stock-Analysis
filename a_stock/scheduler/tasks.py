@@ -18,6 +18,7 @@ from a_stock.sync import (
     sync_stock_news,
     sync_stock_events,
 )
+from a_stock.sync.stock_daily_tushare import sync_stock_daily_tushare
 from a_stock.sync.index_sync import sync_index_daily
 from a_stock.sync import (
     sync_sentiment,
@@ -89,17 +90,16 @@ def daily_sync(date: str = None, notify: bool = False):
     log_info("先执行涨停数据同步（其他任务依赖此数据）...")
     run_sync_task(sync_limit_up, "涨停数据", date=target_date)
     
-    # Step 3: 并发执行其他同步任务（market_stats 在并发任务中，但已有重试机制）
+    # Step 3: 并发执行轻量同步任务
     log_info("开始并发执行其他数据同步任务...")
     
-    # 定义并发任务列表（17:00 盘后同步）
+    # 定义并发任务列表（不含日K数据，避免多线程下连接池冲突）
     concurrent_tasks = [
         (sync_market_stats, "市场统计", {"date": target_date}),
         (sync_index_daily, "三大指数", {"date": target_date}),
         (sync_sector_ranking, "板块排名", {"date": target_date}),
         (sync_sentiment, "市场情绪", {"date": target_date}),
         (sync_stock_hot_ranking, "热门股票榜单", {"date": target_date}),
-        (sync_stock_daily, "日K数据", {"days": 30}),
     ]
     
     # 使用线程池并发执行
@@ -239,6 +239,32 @@ def catch_up_sync(date: str = None):
     log_info(f"=" * 50)
 
 
+def stock_daily_sync(date: str = None):
+    """
+    个股日K数据同步（独立任务，17:30 执行）
+
+    使用 Tushare Pro 批量接口，一次请求获取所有股票当日数据。
+    与 daily_sync 解耦，避免 15:10 时 Tushare 数据尚未就绪的问题。
+
+    Args:
+        date: 指定日期（可选，默认为今天）
+    """
+    target_date = date or datetime.now().strftime("%Y-%m-%d")
+    log_info("=" * 50)
+    log_info(f"个股日K数据同步 - {target_date}")
+    log_info("=" * 50)
+
+    try:
+        result = sync_stock_daily_tushare(date=target_date)
+        log_info(f"日K数据同步完成: 写入 {result.get('success', 0)} 条记录")
+    except Exception as e:
+        log_error(f"日K数据同步失败: {e}")
+
+    log_info("=" * 50)
+    log_info(f"个股日K数据同步完成 - {target_date}")
+    log_info("=" * 50)
+
+
 def dragon_tiger_sync(date: str = None):
     """
     龙虎榜数据同步
@@ -256,7 +282,7 @@ def main():
     import argparse
     
     parser = argparse.ArgumentParser(description="调度任务")
-    parser.add_argument("task", choices=["daily", "morning", "catchup"], help="任务类型")
+    parser.add_argument("task", choices=["daily", "morning", "catchup", "stock-daily"], help="任务类型")
     parser.add_argument("--date", help="指定日期")
     parser.add_argument("--notify", action="store_true", help="发送通知")
     
@@ -268,6 +294,8 @@ def main():
         morning_sync(date=args.date)
     elif args.task == "catchup":
         catch_up_sync(date=args.date)
+    elif args.task == "stock-daily":
+        stock_daily_sync(date=args.date)
 
 if __name__ == "__main__":
     main()

@@ -14,6 +14,7 @@ import tushare as ts
 from a_stock.db import get_connection
 from a_stock.db.cache import log_debug, log_info, log_error
 from a_stock.db.repository import StockDailyRepository
+from a_stock.utils.config import get_tushare_token
 
 
 class TushareStockDailySync:
@@ -183,14 +184,20 @@ def sync_stock_daily_tushare(date: str = None, token: Optional[str] = None) -> D
     
     Args:
         date: 指定日期 (YYYY-MM-DD)
-        token: Tushare Pro token
+        token: Tushare Pro token，不传则从配置读取
         
     Returns:
         同步结果统计
     """
-    # 使用默认 token
+    # 从配置读取 token（支持环境变量和配置文件）
     if token is None:
-        token = '11e60f09feabbe8dd7daeb63005a1348c3d02a2c1285ec0ff7e82388'
+        token = get_tushare_token()
+        if not token:
+            raise ValueError(
+                "未找到 Tushare Token，请通过以下方式配置：\n"
+                "1. 设置环境变量: export TUSHARE_TOKEN='your_token'\n"
+                "2. 在 config/config.yaml 中配置 data_source.tushare.token"
+            )
     
     syncer = TushareStockDailySync(token=token)
     return syncer.sync_stock_daily(date)

@@ -230,23 +230,48 @@ def save_stock_info(stocks: List[Dict], details: Dict[str, Dict] = None):
             ).fetchone()
 
             if existing:
-                # 更新（只更新数据库中存在的字段）
-                cursor.execute(
-                    """UPDATE stock_info SET 
-                       name = ?, market = ?, industry = ?,
-                       total_market_cap_yi = ?, pe_ratio = ?, pb_ratio = ?, updated_at = ?
-                       WHERE code = ?""",
-                    (
-                        stock.get("name"),
-                        market,
-                        stock.get("industry"),
-                        detail.get("total_market_cap_yi"),
-                        detail.get("pe_ratio"),
-                        detail.get("pb_ratio"),
-                        now,
-                        code,
-                    ),
-                )
+                # 更新基础信息（name, market），不覆盖已有的 industry
+                # industry 由独立的 update_stock_industry.py 脚本维护
+                industry_value = stock.get("industry")
+                if industry_value:
+                    cursor.execute(
+                        """UPDATE stock_info SET
+                           name = ?, market = ?, industry = ?,
+                           total_market_cap_yi = COALESCE(?, total_market_cap_yi),
+                           pe_ratio = COALESCE(?, pe_ratio),
+                           pb_ratio = COALESCE(?, pb_ratio),
+                           updated_at = ?
+                           WHERE code = ?""",
+                        (
+                            stock.get("name"),
+                            market,
+                            industry_value,
+                            detail.get("total_market_cap_yi"),
+                            detail.get("pe_ratio"),
+                            detail.get("pb_ratio"),
+                            now,
+                            code,
+                        ),
+                    )
+                else:
+                    cursor.execute(
+                        """UPDATE stock_info SET
+                           name = ?, market = ?,
+                           total_market_cap_yi = COALESCE(?, total_market_cap_yi),
+                           pe_ratio = COALESCE(?, pe_ratio),
+                           pb_ratio = COALESCE(?, pb_ratio),
+                           updated_at = ?
+                           WHERE code = ?""",
+                        (
+                            stock.get("name"),
+                            market,
+                            detail.get("total_market_cap_yi"),
+                            detail.get("pe_ratio"),
+                            detail.get("pb_ratio"),
+                            now,
+                            code,
+                        ),
+                    )
                 updated_count += 1
             else:
                 # 插入（只插入数据库中存在的字段）

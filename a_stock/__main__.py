@@ -32,7 +32,7 @@ def main():
         sys.argv = sys.argv[1:]
         sync_main()
     elif command == "analyze":
-        from a_stock.analysis import main as analyze_main
+        from a_stock.analysis.__main__ import main as analyze_main
         sys.argv = sys.argv[1:]
         analyze_main()
     elif command == "notify":

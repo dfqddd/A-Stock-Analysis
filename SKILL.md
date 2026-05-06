@@ -1,7 +1,7 @@
 ---
 name: a-stock-analysis
 version: "1.0.0"
-description: "A股盘面综合分析工具。基于AKShare的中短线/趋势/波段分析，覆盖大盘环境、板块轮动、资金面(含龙虎榜)、市场情绪、消息面(财联社/外围市场)、个股技术面(均线/量价)、近3天趋势对比。适用于盘前策略制定、盘中快速扫描、盘后复盘总结。当用户提到：复盘、盘面分析、今天行情怎么样、板块轮动、北向资金、涨停分析、市场情绪、龙虎榜、个股分析、消息面、外围市场等关键词时触发。"
+description: "A股盘面综合分析工具。基于AKShare的中短线/趋势/波段分析，覆盖大盘环境、板块轮动、涨停情绪、市场情绪、个股技术面(均线/量价)、近3天趋势对比。适用于盘前策略制定、盘中快速扫描、盘后复盘总结。当用户提到：复盘、盘面分析、今天行情怎么样、板块轮动、涨停分析、市场情绪、个股分析、消息面等关键词时触发。注意：资金流向(北向/龙虎榜/主力)数据当前不更新，分析时跳过该维度。"
 tags:
   - "股票分析"
   - "A股"
@@ -277,17 +277,17 @@ pip install akshare pandas
 | `index_daily` | 大盘指数日线 | `(date, code)` | code, name, close, change_pct, volume, amount |
 | `market_stats` | 每日市场统计 | `date` | up_count, down_count, limit_up, limit_down, total_amount_yi |
 | `sector_ranking` | 板块排名 | `(date, type, rank)` | type(industry/concept), name, change_pct, leading_stock, up_count |
-| `capital_flow` | 资金流向 | `date` | north_net_yi, sh_connect_yi, sz_connect_yi, margin_balance_yi, main_flow_json |
-| `sentiment` | 市场情绪 | `date` | limit_up_total, first_board, continuous_board, max_height, seal_rate, broken_rate |
+| `capital_flow` | 资金流向 | `date` | north_net_yi, sh_connect_yi, sz_connect_yi, margin_balance_yi, main_flow_json | ⚠️ 数据停更（最新 2026-03-11），查询无意义 |
+| `sentiment` | 市场情绪 | `date` | limit_up_total, first_board, continuous_board, max_height, seal_rate, broken_rate, bull_bear_index, fear_greed_index |
 | `stock_daily` | 个股日K线 | `(date, code)` | name, open, close, high, low, volume, amount, change_pct, turnover_rate |
 | `stock_info` | 个股基本信息 | `code` | name, market, board, industry, concepts(JSON), total_market_cap_yi, pe_ratio, pb_ratio |
 | `stock_news` | 个股新闻 | `id` (自增), 唯一索引 `(code, date, title)` | type(news/telegraph), title, content, source, url |
 | `stock_events` | 个股重大事件 | `id` (自增), 唯一索引 `(code, date, event_type)` | event_type(forecast/express/dividend/unlock/buyback), detail_json |
 | `limit_up_detail` | 涨停股详情 | `(date, code)` | status(limit_up/broken), seal_amount_yi, continuous_board, limit_up_stat, industry |
-| `stock_fund_flow` | 个股资金流向 | `(date, code)` | inflow_yi, outflow_yi, net_flow_yi, amount_yi, change_pct |
-| `sector_fund_flow` | 板块资金流向 | `(date, name)` | net_flow_yi, total_amount_yi, up_count, down_count, leading_stock |
-| `dragon_tiger` | 龙虎榜数据 | `id` (自增), UNIQUE `(date, code)` | date, code, name, close_price, change_pct, lhb_reason, buy_value, sell_value, net_buy_value |
-| `stock_hot_ranking` | 热门股票榜单 | `(date, code)` | total_rank, total_score, ths_rank, tgb_rank, dcb_rank, xq_rank, source_count |
+| `stock_fund_flow` | 个股资金流向 | `(date, code)` | inflow_yi, outflow_yi, net_flow_yi, amount_yi, change_pct | ⚠️ 数据停更（最新 2026-03-11） |
+| `sector_fund_flow` | 板块资金流向 | `(date, name)` | net_flow_yi, total_amount_yi, up_count, down_count, leading_stock | ⚠️ 数据停更（最新 2026-03-06） |
+| `dragon_tiger` | 龙虎榜数据 | `id` (自增), UNIQUE `(date, code)` | date, code, name, close_price, change_pct, lhb_reason, buy_value, sell_value, net_buy_value | ⚠️ 数据停更（最新 2026-03-11） |
+| `stock_hot_ranking` | 热门股票榜单 | `(date, code)` | total_rank, total_score, ths_rank, tgb_rank, dcb_rank, xq_rank, source_count | ⚠️ 偶发更新，不保证当日有数据 |
 | `stock_abnormal_movement` | 个股异动 | `id` (自增), UNIQUE `(code, movement_type, enter_date)` | movement_type, stage, enter_date, exit_date, trigger_price, trigger_change, risk_level |
 
 ### 常用查询示例
@@ -467,16 +467,14 @@ bash scheduler/install.sh
 - [ ] 找出板块内涨停数 >5 的强势板块
 - **结论**：当日最强方向 + 持续性判断
 
-### 3. 资金面 ✅必查（含4个子项，全部必查）
-- [ ] **北向资金**：查 `capital_flow.north_net_yi`，近3天趋势
-- [ ] **龙虎榜**：查 `capital_flow.dragon_tiger_json`，分析：
-  - 机构净买入/卖出方向（哪些行业？）
-  - 持仓股是否上榜（直接信号）
-  - 持仓股同行业个股是否上榜（间接信号）
-  - 净买入 top5 和净卖出 top5
-- [ ] **主力资金**：查 `capital_flow.main_flow_json`
-- [ ] **融资融券**：查 `capital_flow.margin_balance_yi`
-- **结论**：聪明钱在买什么、卖什么，对持仓股的影响
+### 3. 资金面 ⚠️ 数据暂停更新，跳过此维度
+> **注意**：以下数据表当前均已停止更新，查询会返回空或过期数据，分析时直接跳过，不要尝试查询：
+> - `capital_flow`（北向资金、主力资金、融资融券）：最新数据停留在 2026-03-11
+> - `dragon_tiger`（龙虎榜）：最新数据停留在 2026-03-11
+> - `stock_fund_flow`（个股资金流）：最新数据停留在 2026-03-11
+> - `sector_fund_flow`（板块资金流）：最新数据停留在 2026-03-06
+>
+> 如用户明确询问资金面，直接告知"资金流向数据暂时无法获取，该维度跳过"。
 
 ### 4. 市场情绪 ✅必查
 - [ ] 查 `sentiment` 表：连板高度、封板率、炸板率
@@ -513,7 +511,7 @@ bash scheduler/install.sh
 | 指标 | 低迷/弱势 | 正常 | 活跃/强势 | 火热/极端 |
 |------|-----------|------|-----------|-----------|
 | **量能**（两市成交额） | <P25 | P25~P75 | >P75 | >P90 |
-| **北向资金**（单日净流入） | <P25 | P25~P75 | >P75 | >P90 |
+| **北向资金**（单日净流入） | <P25 | P25~P75 | >P75 | >P90 | ⚠️ 数据暂停更新，跳过 |
 | **连板高度**（最高连板数） | <P25 | P25~P75 | >P75 | >P90 |
 | **封板率** | <P25 | P25~P75 | >P75 | >P90 |
 

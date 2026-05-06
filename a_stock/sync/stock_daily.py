@@ -319,6 +319,15 @@ def sync_stock_daily(code: str = None, date: str = None, days: int = 30):
     target_date = date or datetime.now().strftime("%Y-%m-%d")
     log_info(f"开始同步个股日K数据: {target_date}")
     
+    # 交易日校验：非交易日不同步，避免写入错误数据
+    try:
+        from a_stock.utils.trading_calendar import is_trading_day
+        if not is_trading_day(target_date):
+            log_info(f"⚠️ {target_date} 非交易日，跳过日线数据同步")
+            return
+    except Exception as e:
+        log_debug(f"交易日校验异常({e})，继续同步")
+    
     # 获取 Repository
     repository = StockDailyRepository()
     
@@ -329,22 +338,9 @@ def sync_stock_daily(code: str = None, date: str = None, days: int = 30):
             records = fetch_stock_daily_tushare(target_date)
             
             if records:
-                # 过滤已存在的数据
-                filtered_records = []
-                for record in records:
-                    stock_code = record.get('code')
-                    record_date = record.get('date')
-                    
-                    # 检查是否已存在
-                    existing = repository.find_by_id(date=record_date, code=stock_code)
-                    if not existing:
-                        filtered_records.append(record)
-                
-                if filtered_records:
-                    repository.save_batch(filtered_records)
-                    log_info(f"Tushare 批量同步完成: 新增 {len(filtered_records)} 条记录")
-                else:
-                    log_info("Tushare 数据已是最新，无需更新")
+                # 直接批量写入（INSERT OR REPLACE），无需逐条查重
+                repository.save_batch(records)
+                log_info(f"Tushare 批量同步完成: 写入 {len(records)} 条记录")
                 return
             else:
                 log_info("Tushare 返回空数据，回退到 AKShare 数据源")

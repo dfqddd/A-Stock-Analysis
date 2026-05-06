@@ -28,9 +28,6 @@ def main():
     review_parser.add_argument("--notify", action="store_true", help="发送通知")
 
     # 通用参数
-    for sub in [subparsers._actions[-1] for _ in range(6)]:
-        pass  # 占位
-
     parser.add_argument("--date", help="指定日期")
     parser.add_argument("--output", choices=["json", "text"], default="text", help="输出格式")
 

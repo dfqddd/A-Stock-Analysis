@@ -376,10 +376,131 @@ def register_market_stats_datasources():
     )
 
 
+def sync_market_stats_from_stock_daily(target_date: str) -> bool:
+    """
+    从 stock_daily 表聚合计算市场统计数据（降级兜底方案）
+
+    当实时行情接口不可用时（如收盘后），从已有的 stock_daily 数据聚合计算。
+
+    Args:
+        target_date: 目标日期
+
+    Returns:
+        是否成功
+    """
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+
+        # 检查 stock_daily 是否有当天数据
+        count = cursor.execute(
+            "SELECT COUNT(*) FROM stock_daily WHERE date = ?", (target_date,)
+        ).fetchone()[0]
+
+        if count < 1000:
+            log_error(f"stock_daily 表 {target_date} 数据不足（{count} 条），无法聚合")
+            return False
+
+        # 从 stock_daily 聚合统计数据
+        row = cursor.execute(
+            """
+            SELECT
+                SUM(CASE WHEN change_pct > 0 THEN 1 ELSE 0 END) as up_count,
+                SUM(CASE WHEN change_pct < 0 THEN 1 ELSE 0 END) as down_count,
+                SUM(CASE WHEN change_pct = 0 THEN 1 ELSE 0 END) as flat_count,
+                ROUND(SUM(amount) / 100000000.0, 2) as total_amount_yi,
+                COUNT(*) as total
+            FROM stock_daily
+            WHERE date = ?
+            """,
+            (target_date,)
+        ).fetchone()
+
+        up_count = row[0] or 0
+        down_count = row[1] or 0
+        flat_count = row[2] or 0
+        total_amount_yi = row[3] or 0.0
+        total = row[4] or 1
+        up_ratio = round(up_count / total * 100, 2)
+
+        # 优先从 limit_up_detail 获取准确的涨跌停数
+        limit_up_count = cursor.execute(
+            "SELECT COUNT(*) FROM limit_up_detail WHERE date = ? AND status IN ('涨停','limit_up')",
+            (target_date,)
+        ).fetchone()[0]
+        limit_down_count = cursor.execute(
+            "SELECT COUNT(*) FROM limit_up_detail WHERE date = ? AND status IN ('跌停','broken')",
+            (target_date,)
+        ).fetchone()[0]
+
+        # limit_up_detail 没数据时（如补偿顺序问题），从 stock_daily 的 change_pct 估算
+        # 判断规则：科创板/创业板 >=19.9%，主板 >=9.99%，跌停取反
+        if limit_up_count == 0 and limit_down_count == 0:
+            log_info("limit_up_detail 暂无数据，从 stock_daily.change_pct 估算涨跌停数")
+            est_row = cursor.execute(
+                """
+                SELECT
+                    SUM(CASE
+                        WHEN (code LIKE '688%' OR code LIKE '689%'
+                              OR code LIKE '300%' OR code LIKE '301%' OR code LIKE '302%')
+                             AND change_pct >= 19.9 THEN 1
+                        WHEN change_pct >= 9.99 THEN 1
+                        ELSE 0
+                    END) as est_limit_up,
+                    SUM(CASE
+                        WHEN (code LIKE '688%' OR code LIKE '689%'
+                              OR code LIKE '300%' OR code LIKE '301%' OR code LIKE '302%')
+                             AND change_pct <= -19.9 THEN 1
+                        WHEN change_pct <= -9.99 THEN 1
+                        ELSE 0
+                    END) as est_limit_down
+                FROM stock_daily WHERE date = ?
+                """,
+                (target_date,)
+            ).fetchone()
+            limit_up_count = est_row[0] or 0
+            limit_down_count = est_row[1] or 0
+            log_info(f"估算涨停 {limit_up_count} 只，跌停 {limit_down_count} 只")
+
+        data = {
+            "date": target_date,
+            "total_amount": total_amount_yi,
+            "up_count": up_count,
+            "down_count": down_count,
+            "flat_count": flat_count,
+            "limit_up_count": limit_up_count,
+            "limit_down_count": limit_down_count,
+            "up_ratio": up_ratio,
+            "new_high_count": 0,
+            "new_low_count": 0,
+            "avg_turnover": 0.0,
+            "total_volume": 0,
+        }
+
+        conn.close()
+        save_market_stats([data])
+        log_info(
+            f"从 stock_daily 聚合市场统计完成: 上涨 {up_count}, 下跌 {down_count}, "
+            f"涨停 {limit_up_count}, 跌停 {limit_down_count}, 成交额 {total_amount_yi:.0f} 亿"
+        )
+        return True
+
+    except Exception as e:
+        log_error(f"从 stock_daily 聚合市场统计失败: {e}")
+        return False
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
 def sync_market_stats(date: str = None):
     """
     同步市场统计数据（支持多数据源自动降级）
-    
+
+    优先从实时行情接口获取，若所有接口失败则从 stock_daily 表聚合兜底。
+
     Args:
         date: 指定日期（可选，默认为今天）
     """
@@ -393,7 +514,7 @@ def sync_market_stats(date: str = None):
     try:
         # 使用数据源管理器获取数据（自动降级）
         data = manager.fetch("market_stats", target_date)
-        
+
         save_market_stats([data])
         log_info(f"市场统计数据同步完成: 上涨 {data['up_count']}, "
                  f"下跌 {data['down_count']}, "
@@ -401,7 +522,10 @@ def sync_market_stats(date: str = None):
                  f"跌停 {data['limit_down_count']}")
 
     except Exception as e:
-        log_error(f"同步市场统计数据失败: {e}")
+        log_error(f"实时行情接口同步市场统计失败: {e}")
+        log_info("尝试从 stock_daily 表聚合兜底...")
+        if not sync_market_stats_from_stock_daily(target_date):
+            log_error(f"同步市场统计数据失败: 实时接口和聚合兜底均失败")
 
 
 if __name__ == "__main__":

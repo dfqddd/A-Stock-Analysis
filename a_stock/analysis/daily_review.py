@@ -92,7 +92,7 @@ def generate_summary(market: dict, sentiment: dict, sector: dict, capital: dict)
 
     # 板块轮动
     if sector and sector.get("industry_top"):
-        top_industries = [s["sector"] for s in sector["industry_top"][:3]]
+        top_industries = [s["name"] for s in sector["industry_top"][:3]]
         parts.append(f"领涨板块：{', '.join(top_industries)}。")
 
     return " ".join(parts)
@@ -149,7 +149,7 @@ def format_text_report(report: dict) -> str:
         lines.append(f"\n【板块轮动】")
         lines.append("行业涨幅榜:")
         for s in sector["industry_top"][:5]:
-            lines.append(f"  {s['sector']}: +{s['change_pct']:.2f}%")
+            lines.append(f"  {s['name']}: +{s['change_pct']:.2f}%")
 
     # 热门股票
     hot = report.get("hot_stocks", {})

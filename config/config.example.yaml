@@ -6,8 +6,11 @@
 # ====================
 dingtalk:
   enabled: true
-  # 从环境变量读取 webhook，避免硬编码敏感信息
-  # 设置环境变量: export DINGTALK_WEBHOOK='https://oapi.dingtalk.com/robot/send?access_token=你的token'
+  # 方式1: 直接填写（不推荐，可能泄露）
+  # webhook: https://oapi.dingtalk.com/robot/send?access_token=your_token
+  
+  # 方式2: 从环境变量读取（推荐）
+  # 设置环境变量: export DINGTALK_WEBHOOK='your_webhook_url'
   webhook: ${DINGTALK_WEBHOOK}
 
   # 消息推送时段配置
@@ -65,15 +68,16 @@ database:
 # ====================
 data_source:
   # 主数据源: akshare / tushare / baostock
-  primary: akshare
-
-  # 降级数据源（主数据源失败时使用）
-  fallback: eastmoney
-
-  # Tushare Pro Token（如使用 Tushare）
-  # 从环境变量读取: export TUSHARE_TOKEN='你的token'
-  # tushare:
-  #   token: ${TUSHARE_TOKEN}
+  primary: tushare
+  
+  # Tushare Pro Token
+  # 方式1: 直接填写（不推荐，可能泄露）
+  # token: your_token_here
+  
+  # 方式2: 从环境变量读取（推荐）
+  # 设置环境变量: export TUSHARE_TOKEN='your_token'
+  tushare:
+    token: ${TUSHARE_TOKEN}
 
 
 # ====================

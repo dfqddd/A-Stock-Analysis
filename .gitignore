@@ -53,3 +53,4 @@ node_modules/
 
 # Sync status
 data/sync_status/
+data/stock_info.db

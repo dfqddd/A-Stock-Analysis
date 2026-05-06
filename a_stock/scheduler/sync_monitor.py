@@ -154,16 +154,6 @@ DATA_CHECKERS = {
         "check_sql": "SELECT COUNT(*) as count FROM sentiment WHERE date = ?",
         "min_records": 1,
     },
-    "stock_fund_flow": {
-        "name": "个股资金流",
-        "check_sql": "SELECT COUNT(*) as count FROM stock_fund_flow WHERE date = ?",
-        "min_records": 100,  # 至少要有100只股票
-    },
-    "sector_fund_flow": {
-        "name": "板块资金流",
-        "check_sql": "SELECT COUNT(*) as count FROM sector_fund_flow WHERE date = ?",
-        "min_records": 5,
-    },
     "limit_up_detail": {
         "name": "涨停数据",
         "check_sql": "SELECT COUNT(*) as count FROM limit_up_detail WHERE date = ?",
@@ -173,16 +163,6 @@ DATA_CHECKERS = {
         "name": "日K数据",
         "check_sql": "SELECT COUNT(*) as count FROM stock_daily WHERE date = ?",
         "min_records": 3000,  # 至少要有3000只股票
-    },
-    "dragon_tiger": {
-        "name": "龙虎榜",
-        "check_sql": "SELECT COUNT(*) as count FROM dragon_tiger WHERE date = ?",
-        "min_records": 1,  # 正常交易日至少有1条龙虎榜数据
-    },
-    "abnormal_movement": {
-        "name": "个股异动",
-        "check_sql": "SELECT COUNT(*) as count FROM stock_abnormal_movement WHERE date = ?",
-        "min_records": 0,  # 可以为0
     },
     "stock_hot_ranking": {
         "name": "热门股票排名",
@@ -271,66 +251,86 @@ def get_missing_data_tables(target_date: str) -> List[str]:
 # 交易日判断
 # ============================================================================
 
+def _is_weekday(date_str: str) -> bool:
+    """兜底判断：非周末则视为交易日（不考虑法定节假日）"""
+    weekday = datetime.strptime(date_str, "%Y-%m-%d").weekday()
+    return weekday < 5  # 0-4 为周一到周五
+
+
 def is_trading_day(date_str: str) -> bool:
     """
     判断指定日期是否为交易日
-    
+
+    优先使用新浪交易日历精确判断。当日历数据不覆盖目标日期时（如新浪日历只到上一年底），
+    降级为"非周末即交易日"的兜底判断，避免因日历数据滞后导致任务被错误跳过。
+
     Args:
         date_str: 日期字符串 (YYYY-MM-DD)
-        
+
     Returns:
         是否为交易日
     """
     try:
         import akshare as ak
-        
-        # 获取交易日历
+
         df = ak.tool_trade_date_hist_sina()
-        trading_days = df['trade_date'].astype(str).tolist()
-        
-        # 转换日期格式
+        trading_days = sorted(df['trade_date'].astype(str).tolist())
         date_compact = date_str.replace("-", "")
-        
-        return date_compact in trading_days
-        
+
+        # 日历覆盖到目标日期，精确判断
+        if trading_days and trading_days[-1] >= date_compact:
+            return date_compact in trading_days
+
+        # 日历不覆盖目标日期，降级为非周末判断
+        log_info(f"交易日历最新日期 {trading_days[-1]} < {date_compact}，降级为非周末判断")
+        return _is_weekday(date_str)
+
     except Exception as e:
-        log_error(f"判断交易日失败: {e}")
-        # 默认返回True，让任务继续执行
-        return True
+        log_error(f"判断交易日失败: {e}，降级为非周末判断")
+        return _is_weekday(date_str)
 
 
 def get_last_trading_day(date_str: Optional[str] = None) -> str:
     """
     获取最近一个交易日
-    
+
+    优先使用新浪交易日历精确查找。当日历不覆盖目标日期时，降级为向前找最近的工作日。
+
     Args:
         date_str: 参考日期（可选，默认为今天）
-        
+
     Returns:
         最近交易日（YYYY-MM-DD）
     """
+    target_date = date_str or datetime.now().strftime("%Y-%m-%d")
+
     try:
         import akshare as ak
-        
-        target_date = date_str or datetime.now().strftime("%Y-%m-%d")
+
         target_compact = target_date.replace("-", "")
-        
         df = ak.tool_trade_date_hist_sina()
         trading_days = sorted(df['trade_date'].astype(str).tolist())
-        
-        # 找到小于等于目标日期的最后一个交易日
-        for day in reversed(trading_days):
-            if day <= target_compact:
-                return f"{day[:4]}-{day[4:6]}-{day[6:8]}"
-        
-        # 如果没有找到，返回目标日期
-        return target_date
-        
+
+        # 日历覆盖到目标日期，精确查找
+        if trading_days and trading_days[-1] >= target_compact:
+            for day in reversed(trading_days):
+                if day <= target_compact:
+                    return f"{day[:4]}-{day[4:6]}-{day[6:8]}"
+            return target_date
+
+        # 日历不覆盖目标日期，降级为向前找最近工作日
+        log_info(f"交易日历最新日期 {trading_days[-1]} < {target_compact}，降级为向前找工作日")
+
     except Exception as e:
-        log_error(f"获取最近交易日失败: {e}")
-        # 返回昨天作为备选
-        yesterday = datetime.now() - timedelta(days=1)
-        return yesterday.strftime("%Y-%m-%d")
+        log_error(f"获取最近交易日失败: {e}，降级为向前找工作日")
+
+    # 兜底：从目标日期向前找最近的工作日（最多找7天）
+    current = datetime.strptime(target_date, "%Y-%m-%d")
+    for _ in range(7):
+        if current.weekday() < 5:
+            return current.strftime("%Y-%m-%d")
+        current -= timedelta(days=1)
+    return target_date
 
 
 # ============================================================================
@@ -341,14 +341,9 @@ def get_last_trading_day(date_str: Optional[str] = None) -> str:
 COMPENSATION_TASKS = {
     "market_stats": ("a_stock.sync.market_stats_sync", "sync_market_stats"),
     "sector_ranking": ("a_stock.sync.sector_ranking_sync", "sync_sector_ranking"),
-    "capital_flow": ("a_stock.analysis.capital_flow", "sync_capital_flow"),
     "sentiment": ("a_stock.sync.sentiment_sync", "sync_sentiment"),
-    "stock_fund_flow": ("a_stock.sync.stock_fund_flow", "sync_stock_fund_flow"),
-    "sector_fund_flow": ("a_stock.sync.sector_fund_flow", "sync_sector_fund_flow"),
     "limit_up_detail": ("a_stock.sync.limit_up", "sync_limit_up"),
     "stock_daily": ("a_stock.sync.stock_daily", "sync_stock_daily"),
-    "dragon_tiger": ("a_stock.sync.dragon_tiger", "sync_dragon_tiger"),
-    "abnormal_movement": ("a_stock.sync.stock_abnormal_movement", "sync_abnormal_movement"),
     "stock_hot_ranking": ("a_stock.sync.stock_hot_ranking", "sync_stock_hot_ranking"),
     "stock_news": ("a_stock.sync.stock_news", "sync_stock_news"),
     "stock_events": ("a_stock.sync.stock_events", "sync_stock_events"),

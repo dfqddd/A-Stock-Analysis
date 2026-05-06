@@ -208,6 +208,15 @@ def sync_limit_up(date: str = None):
     target_date = date or datetime.now().strftime("%Y-%m-%d")
     log_info(f"开始同步涨停跌停数据: {target_date}")
 
+    # 交易日校验：非交易日不同步，避免写入重复数据
+    try:
+        from a_stock.utils.trading_calendar import is_trading_day
+        if not is_trading_day(target_date):
+            log_info(f"⚠️ {target_date} 非交易日，跳过涨停数据同步")
+            return
+    except Exception as e:
+        log_debug(f"交易日校验异常({e})，继续同步")
+
     try:
         # 注册数据源
         register_datasources()
